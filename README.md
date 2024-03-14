@@ -29,11 +29,10 @@ Github：https://github.com/Qiantigers/verifyBookSource
 我的博客：https://www.skyqian.com
 musa：https://github.com/asdf1319964f/checkbook
 ----------------
-是否使用config.json文件？（不使用则通过命令行输入配置）（y/n）n
-本地文件路径/文件直链URL：https://xiao.ml/shuyuan/7
+使用path.json文件
+检测文件及线程请在path.json文件中进行修改
 书源输出路径（为空则为当前目录，目录最后带斜杠）：
 请输入工作线程，填写数字（并不是越大越好）：64
-是否去重？（y/n）y
 ----------------
 检验进度：
 [####################]100.00%
