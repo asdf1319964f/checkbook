@@ -1,4 +1,3 @@
-# checkbook
 # VerifyBookSource
 
 阅读书源校验工具v3
