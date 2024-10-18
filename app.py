@@ -1,22 +1,22 @@
 import json
-import os.path
-from requests import get
-from concurrent.futures import ThreadPoolExecutor
+import os
+import requests
+from concurrent.futures import ThreadPoolExecutor, as_completed
 import time
-from urllib3.exceptions import InsecureRequestWarning
 import urllib3
+from tqdm import tqdm
+
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
 class Book:
     def __init__(self, config_file):
         with open(config_file, 'r', encoding='utf-8') as cf:
             config = json.load(cf)
-        self.file = config["path"]
-        self.workers = int(config["workers"])
-        self.dedup = config["dedup"].lower() == "y"
-        self.outpath = config["outpath"] if config["outpath"] else "./"
+        self.file = config.get("path")
+        self.workers = int(config.get("workers", 5))
+        self.dedup = config.get("dedup", "n").lower() == "y"
+        self.outpath = config.get("outpath") or "./"
         self.type = self.recog_type(self.file)
-        self.checked_books = 0
-        self.success_books = 0
         self.books = self.json_to_books()
 
     def recog_type(self, file: str):
@@ -24,55 +24,68 @@ class Book:
             return 'url'
         elif os.path.exists(file):
             return os.path.splitext(file)[1]
-        else:
-            return None
+        return None
 
     def json_to_books(self):
         if self.type == '.json':
             with open(self.file, 'r', encoding='utf-8') as f:
                 return json.load(f)
+        return []
 
-    def check(self, abook, timeout=3):
+    @staticmethod
+    def check(abook, timeout=3):
         headers = {
-            'user-agent': 'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.71 Mobile Safari/537.36'
+            'user-agent': (
+                'Mozilla/5.0 (Linux; Android 6.0; Nexus 5 Build/MRA58N) '
+                'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/94.0.4606.71 '
+                'Mobile Safari/537.36'
+            )
         }
-
         try:
-            response = get(url=abook.get('bookSourceUrl'), verify=False, headers=headers, timeout=timeout)
-            status = response.status_code
-
-            if status == 200:
-                return {'book': abook, 'status': True}
-            else:
-                return {'book': abook, 'status': False}
-
-        except Exception as e:
+            response = requests.get(url=abook['bookSourceUrl'], verify=False, headers=headers, timeout=timeout)
+            return {'book': abook, 'status': response.status_code == 200}
+        except requests.RequestException:
             return {'book': abook, 'status': False}
 
-    def checkbooks(self, workers=16):
-        pool = ThreadPoolExecutor(workers)
-        books = self.json_to_books()
-        ans = list(pool.map(self.check, books))
-        good = [item for item in ans if item['status']]
-        error = [item for item in ans if not item['status']]
+    def checkbooks(self):
+        good, error = [], self.books
+        max_attempts = 5
+        attempts = 0
+
+        while error and attempts < max_attempts:
+            new_good, new_error = [], []
+            with ThreadPoolExecutor(max_workers=self.workers) as executor:
+                futures = [executor.submit(self.check, book) for book in error]
+                for future in tqdm(as_completed(futures), total=len(error), desc="检 查 进 度 "):
+                    result = future.result()
+                    (new_good if result['status'] else new_error).append(result)
+                    print(f"\r成 功 : {len(good) + len(new_good)} | 失 败 : {len(new_error)}", end="", flush=True)
+
+            good.extend(new_good)
+            error = [result['book'] for result in new_error]
+            attempts += 1  # 增加尝试次数
+
+        print()  # 换行
         return {"good": good, "error": error}
 
+def main():
+    print("欢 迎 使 用 书 源 校 验 工 具 （ VerifyBookSource v3.0） \n")
+    config_file = "path.json"  # 配置文件路径
+    book_obj = Book(config_file)
+    start_time = time.time()
+    results = book_obj.checkbooks()
+    end_time = time.time()
+
+    os.makedirs(book_obj.outpath, exist_ok=True)
+    with open(os.path.join(book_obj.outpath, 'good.json'), 'w', encoding='utf-8') as f:
+        json.dump([result['book'] for result in results['good']], f, ensure_ascii=False, indent=2)
+    with open(os.path.join(book_obj.outpath, 'error.json'), 'w', encoding='utf-8') as f:
+        json.dump([result['book'] for result in results['error']], f, ensure_ascii=False, indent=2)
+
+    print(f'\n检 查 完 成 ， 耗 时  {end_time - start_time:.2f} 秒 ')
+    print(f'有 效 的 书 源 ： {len(results["good"])}')
+    print(f'无 效 的 书 源 ： {len(results["error"])}')
+    print(f'有 效 的 书 源 和 无 效 的 书 源 已 分 别 写 入  {book_obj.outpath}good.json 和  {book_obj.outpath}error.json')
 
 if __name__ == '__main__':
-    print("欢迎使用书源校验工具（VerifyBookSource v3.0）\n")
-    config_file = "path.json"  # 你的配置文件路径
-    book_obj = Book(config_file)
-    results = book_obj.checkbooks()
-    good_results = results['good']
-    error_results = results['error']
-
-    # 这里将结果写入到json文件中
-    with open(book_obj.outpath + 'good.json', 'w', encoding='utf-8') as f:
-        json.dump([result['book'] for result in good_results], f, ensure_ascii=False)
-
-    with open(book_obj.outpath + 'error.json', 'w', encoding='utf-8') as f:
-        json.dump([result['book'] for result in error_results], f, ensure_ascii=False)
-
-    print('\n有效的书源有：', len(good_results))
-    print('无效的书源有：', len(error_results))
-    print('有效的书源和无效的书源已分别写入' + book_obj.outpath + 'good.json和' + book_obj.outpath + 'error.json')
+    main()
