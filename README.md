@@ -48,5 +48,4 @@ musa：https://github.com/asdf1319964f/checkbook
 
 郑重声明
 
-检测后产生的error.json文件请继续持续检测 免得程序产生误报 
-最好检测一次 导入一次生效的结果
+已加入循环检测5次后自动停止程序
